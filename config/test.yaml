@@ -1,5 +1,5 @@
 # log dir
-log_dir: /data/cuixinjie/FA/logs/test
+log_dir: /home/laoseonghok/github/ForensicsAdapter/logs
 #log_dir: /data/cuixinjie/DsClip_V2/log
 lmdb: False
 mode: text
@@ -29,17 +29,20 @@ all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFak
 train_dataset: [FaceForensics++]
 #test_dataset: [FaceForensics++]
 test_dataset: [Celeb-DF-v1 ,Celeb-DF-v2, DFDCP, DFDC, DeepFakeDetection]
+# test_dataset: [Celeb-DF-v1 ,Celeb-DF-v2]
 
-#test_dataset: [FaceForensics++]
+# test_dataset: [Celeb-DF-v1 ,Celeb-DF-v2,]
+
+# test_dataset: [FaceForensics++]
 
 
 #test_dataset: [FF-F2F]
 
 #dataset_json_folder: '/media/ouc/新加卷/DS_CLIP_V2/dataset/dataset_json'
-dataset_json_folder: '/data/cuixinjie/dataset/dataset_json'
+dataset_json_folder: '/home/laoseonghok/github/DeepfakeBench/preprocessing/dataset_json'
 
 compression: c23  # compression-level for videos
-train_batchSize: 20   # training batch size
+train_batchSize: 16   # training batch size
 test_batchSize: 64   # test batch size
 workers: 8   # number of data loading workers
 frame_num: {'train': 32, 'test': 32}   # number of frames to use per video in training and testing
@@ -123,7 +126,7 @@ start_epoch: 0    # manual epoch number (useful for restarts)
 save_epoch: 2   # interval epochs for saving models
 rec_iter: 100   # interval iterations for recording
 #logdir: /media/ouc/新加卷/DS_CLIP_V2/log  # folder to output images and logs
-logdir: /data/cuixinjie/FA/log/Ablation  # folder to output images and logs
+logdir: /home/laoseonghok/github/ForensicsAdapter/logs  # folder to output images and logs
 
 
 manualSeed: 1020   # manual seed for random number generation

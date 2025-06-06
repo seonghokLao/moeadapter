@@ -131,7 +131,7 @@ class Trainer(object):
     def save_ckpt(self, phase, dataset_key, ckpt_info=None):
         save_dir = os.path.join(self.log_dir, phase, dataset_key)
         os.makedirs(save_dir, exist_ok=True)
-        ckpt_name = f"ckpt_best.pth"
+        ckpt_name = f"ckpt_best{ckpt_info.replace('+', '')}.pth"
         save_path = os.path.join(save_dir, ckpt_name)
         if self.config['ddp'] == True:
             torch.save(self.model.state_dict(), save_path)
@@ -217,7 +217,7 @@ class Trainer(object):
         if epoch >= 3:
             times_per_epoch = 1
         else:
-            times_per_epoch = 4
+            times_per_epoch = 20
 
 
         test_step = len(train_data_loader) // times_per_epoch
@@ -286,7 +286,7 @@ class Trainer(object):
                     recorder.clear()
 
             # run test
-            if (step_cnt + 1) % test_step == 0:
+            if (step_cnt + 1) % test_step == 0 or step_cnt == len(train_data_loader) // 3:
                 if test_data_loaders is not None :
                     self.logger.info("===> Test start!")
                     test_best_metric = self.test_epoch(
@@ -316,30 +316,31 @@ class Trainer(object):
         prediction_lists = []
         feature_lists = []
         label_lists = []
-        for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
-            # get data
-            if 'label_spe' in data_dict:
-                data_dict.pop('label_spe')  # remove the specific label
-            data_dict['label'] = torch.where(data_dict['label'] != 0, 1, 0)  # fix the label to 0 and 1 only
-            # move data to GPU elegantly
-            for key in data_dict.keys():
-                if data_dict[key] != None:
-                    data_dict[key] = data_dict[key].cuda()
-            # model forward without considering gradient computation
-            predictions = self.inference(data_dict)
-            label_lists += list(data_dict['label'].cpu().detach().numpy())
-            prediction_lists += list(predictions['prob'].cpu().detach().numpy())
-            #feature_lists += list(predictions['feat'].cpu().detach().numpy())
-            if type(self.model) is not AveragedModel:
-                # compute all losses for each batch data
-                if type(self.model) is DDP:
-                    losses = self.model.module.get_losses(data_dict, predictions)
-                else:
-                    losses = self.model.get_losses(data_dict, predictions)
+        with torch.no_grad():
+            for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
+                # get data
+                if 'label_spe' in data_dict:
+                    data_dict.pop('label_spe')  # remove the specific label
+                data_dict['label'] = torch.where(data_dict['label'] != 0, 1, 0)  # fix the label to 0 and 1 only
+                # move data to GPU elegantly
+                for key in data_dict.keys():
+                    if data_dict[key] != None:
+                        data_dict[key] = data_dict[key].cuda()
+                # model forward without considering gradient computation
+                predictions = self.inference(data_dict)
+                label_lists += list(data_dict['label'].cpu().detach().numpy())
+                prediction_lists += list(predictions['prob'].cpu().detach().numpy())
+                #feature_lists += list(predictions['feat'].cpu().detach().numpy())
+                if type(self.model) is not AveragedModel:
+                    # compute all losses for each batch data
+                    if type(self.model) is DDP:
+                        losses = self.model.module.get_losses(data_dict, predictions)
+                    else:
+                        losses = self.model.get_losses(data_dict, predictions)
 
-                # store data by recorder
-                for name, value in losses.items():
-                    test_recorder_loss[name].update(value)
+                    # store data by recorder
+                    for name, value in losses.items():
+                        test_recorder_loss[name].update(value)
 
         #return test_recorder_loss, np.array(prediction_lists), np.array(label_lists), np.array(feature_lists)
         return test_recorder_loss, np.array(prediction_lists), np.array(label_lists)
@@ -356,10 +357,11 @@ class Trainer(object):
             self.best_metrics_all_time[key][self.metric_scoring] = metric_one_dataset[self.metric_scoring]
             if key == 'avg':
                 self.best_metrics_all_time[key]['dataset_dict'] = metric_one_dataset['dataset_dict']
-            # Save checkpoint, feature, and metrics if specified in config
-            if self.config['save_ckpt'] and key not in FFpp_pool:
-                self.save_ckpt('test', key, f"{epoch}+{iteration}")
             self.save_metrics('test', metric_one_dataset, key)
+            # Save checkpoint, feature, and metrics if specified in config
+        if self.config['save_ckpt'] and key not in FFpp_pool:
+            self.save_ckpt('test', key, f"{epoch}+{iteration}")
+        
         if losses_one_dataset_recorder is not None:
             # info for each dataset
             loss_str = f"dataset: {key}    step: {step}    "

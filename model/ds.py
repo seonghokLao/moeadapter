@@ -22,7 +22,7 @@ class DS(nn.Module):
                  mode='video'):
         super().__init__()
         self.device = device
-        self.clip_model, self.processor = load(clip_name, device=device,download_root='/data/cuixinjie/weights')
+        self.clip_model, self.processor = load(clip_name, device=device,download_root='/home/laoseonghok/github/ForensicsAdapter/weights')
         self.adapter = Adapter(vit_name=adapter_vit_name, num_quires=num_quires, fusion_map=fusion_map, mlp_dim=mlp_dim,
                                mlp_out_dim=mlp_out_dim, head_num=head_num, device=self.device)
         self.rec_attn_clip = RecAttnClip(self.clip_model.visual, num_quires,device=self.device)  # 全部参数被冻结

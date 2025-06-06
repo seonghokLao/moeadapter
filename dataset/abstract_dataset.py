@@ -357,7 +357,8 @@ class DeepfakeAbstractBaseDataset(data.Dataset):
             and the mask tensor.
         """
         # Get the image paths and label
-        image_path = self.data_dict['image'][index]
+        # image_path = self.data_dict['image'][index]
+        image_path = '/home/laoseonghok/github/DeepfakeBench/datasets/rgb/' + self.data_dict['image'][index].replace('\\', '/')
         label = self.data_dict['label'][index]
 
         # Get the mask and landmark paths
