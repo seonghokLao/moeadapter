@@ -20,7 +20,7 @@ from logger import create_logger, RankFilter
 
 parser = argparse.ArgumentParser(description='Process some paths.')
 parser.add_argument('--config_path', type=str,
-                    default='/home/laoseonghok/github/ForensicsAdapter/config/train.yaml',
+                    default='/home/laoseonghok/github/moeadapter/config/train.yaml',
                     help='path to detector YAML file')
 parser.add_argument("--train_dataset", nargs="+")
 parser.add_argument("--test_dataset", nargs="+")

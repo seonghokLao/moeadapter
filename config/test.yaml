@@ -1,5 +1,5 @@
 # log dir
-log_dir: /home/laoseonghok/github/ForensicsAdapter/logs
+log_dir: /home/laoseonghok/github/moeadapter/logs
 #log_dir: /data/cuixinjie/DsClip_V2/log
 lmdb: False
 mode: text
@@ -126,7 +126,7 @@ start_epoch: 0    # manual epoch number (useful for restarts)
 save_epoch: 2   # interval epochs for saving models
 rec_iter: 100   # interval iterations for recording
 #logdir: /media/ouc/新加卷/DS_CLIP_V2/log  # folder to output images and logs
-logdir: /home/laoseonghok/github/ForensicsAdapter/logs  # folder to output images and logs
+logdir: /home/laoseonghok/github/moeadapter/logs  # folder to output images and logs
 
 
 manualSeed: 1020   # manual seed for random number generation

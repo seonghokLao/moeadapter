@@ -18,14 +18,14 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Process some paths.')
 parser.add_argument('--detector_path', type=str, 
-                    default='/home/laoseonghok/github/ForensicsAdapter/config/test.yaml',
+                    default='/home/laoseonghok/github/moeadapter/config/test.yaml',
                     help='path to detector YAML file')
 parser.add_argument("--test_dataset", nargs="+")
 parser.add_argument('--weights_path', type=str,
                     #  ds_ _2024-12-20-21-48-57ds_ _2024-12-30-18-07-52
                     #ds_ _2024-12-22-15-55-57 FFIW 83 71  WDF auc: 0.8351 video_auc: 0.8747 DF10  video_auc: 0.98225  auc: 0.961988821
                     #ds_ _2024-12-26-16-47-41  WDF 85 86   DF10 0.95505  video_auc: 0.97841
-                    default='/home/laoseonghok/github/ForensicsAdapter/logs/new/ds_ _2025-06-05-08-18-19/test/avg/ckpt_best01434.pth')  #
+                    default='/home/laoseonghok/github/moeadapter/logs/new/ds_ _2025-06-10-03-48-46/test/avg/ckpt_best019139.pth')  #
 #parser.add_argument("--lmdb", action='store_true', default=False)
 args = parser.parse_args()
 

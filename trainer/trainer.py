@@ -131,7 +131,7 @@ class Trainer(object):
     def save_ckpt(self, phase, dataset_key, ckpt_info=None):
         save_dir = os.path.join(self.log_dir, phase, dataset_key)
         os.makedirs(save_dir, exist_ok=True)
-        ckpt_name = f"ckpt_best{ckpt_info.replace('+', '')}.pth"
+        ckpt_name = f"ckpt_best{ckpt_info}.pth"
         save_path = os.path.join(save_dir, ckpt_name)
         if self.config['ddp'] == True:
             torch.save(self.model.state_dict(), save_path)
@@ -201,6 +201,8 @@ class Trainer(object):
                 losses = self.model.get_losses(data_dict, predictions)
             #self.optimizer.zero_grad()
             losses['overall'].backward()
+            total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
+            print(f'Clipped grad norm: {total_norm:.2f}')
             self.optimizer.step()
 
             return losses, predictions
@@ -217,7 +219,7 @@ class Trainer(object):
         if epoch >= 3:
             times_per_epoch = 1
         else:
-            times_per_epoch = 20
+            times_per_epoch = 10
 
 
         test_step = len(train_data_loader) // times_per_epoch

@@ -22,7 +22,7 @@ class DS(nn.Module):
                  mode='video'):
         super().__init__()
         self.device = device
-        self.clip_model, self.processor = load(clip_name, device=device,download_root='/home/laoseonghok/github/ForensicsAdapter/weights')
+        self.clip_model, self.processor = load(clip_name, device=device,download_root='/home/laoseonghok/github/moeadapter/weights')
         self.adapter = Adapter(vit_name=adapter_vit_name, num_quires=num_quires, fusion_map=fusion_map, mlp_dim=mlp_dim,
                                mlp_out_dim=mlp_out_dim, head_num=head_num, device=self.device)
         self.rec_attn_clip = RecAttnClip(self.clip_model.visual, num_quires,device=self.device)  # 全部参数被冻结
@@ -47,12 +47,13 @@ class DS(nn.Module):
         xray_pred = pred_dict['xray_pred']
         loss_intra = pred_dict['loss_intra']
         loss_clip = pred_dict['loss_clip']
+        loss_lora = pred_dict['loss_lora']
         criterion = nn.CrossEntropyLoss()
         loss1 = criterion(pred.float(), label)
         if xray is not None:
             loss_mse = F.mse_loss(xray_pred.squeeze().float(), xray.squeeze().float())  # (N 1 224 224)->(N 224 224)
 
-            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip
+            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip + 20 * loss_lora
 
 
             loss_dict = {
@@ -60,6 +61,7 @@ class DS(nn.Module):
                 'xray': loss_mse,
                 'intra': loss_intra,
                 'loss_clip':loss_clip,
+                'loss_lora':loss_lora,
                 'overall': loss
             }
             return loss_dict
@@ -107,7 +109,7 @@ class DS(nn.Module):
 
         clip_features = self.clip_model.extract_features(clip_images, self.adapter.fusion_map.values())
 
-        attn_biases, xray_preds, loss_adapter_intra = self.adapter(data_dict, clip_features,
+        attn_biases, xray_preds, loss_adapter_intra, loss_lora = self.adapter(data_dict, clip_features,
                                                                                 inference)
         clip_output, loss_clip = self.rec_attn_clip(data_dict, clip_features, attn_biases[-1], inference, normalize=True)
 
@@ -129,6 +131,7 @@ class DS(nn.Module):
             'xray_pred': outputs['xray_pred'],
             'loss_intra': loss_adapter_intra,
             'loss_clip':loss_clip,
+            'loss_lora':loss_lora
         }
 
         if inference:
@@ -151,5 +154,14 @@ class DS(nn.Module):
             correct = (prediction_class == data_dict['label']).sum().item()
             self.correct += correct
             self.total += data_dict['label'].size(0)
+
+        if torch.isnan(pred_dict['prob']).any():
+            print("NaN in prob output")
+            print("Raw logits:", outputs['clip_cls_output'])
+            raise ValueError("Nans found in model output (prob)")
+
+        if torch.isnan(pred_dict['cls']).any():
+            print("NaN in class logits")
+            raise ValueError("Nans found in model output (cls)")
 
         return pred_dict

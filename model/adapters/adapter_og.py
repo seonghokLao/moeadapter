@@ -6,8 +6,6 @@ from torch.nn import functional as F
 from model.layer import Fusion, MLP, PatchEmbed, VT_LN
 from functools import partial
 
-from model.moe_layers.lora_moe import LoRA_MoElayer
-
 
 class Mask_Decoder(nn.Module):
     def __init__(self, in_dim, mlp_dim=512, out_dim=256, mlp_num_layers=3, head_num=16):
@@ -66,10 +64,6 @@ class Adapter(nn.Module):
         self.ln_pre = VT_LN(self.num_features)
         self.patch_conv = nn.Conv2d(in_channels=3, out_channels=self.num_features, kernel_size=16, stride=16,
                                     bias=True)
-        self.lora_moe_layers = nn.ModuleList([
-            LoRA_MoElayer(dim=self.num_features).to(self.device)
-            for _ in self.vit_model.blocks
-        ])
 
     def fuse(self, block_idx, x, clip_features, spatial_shape):
         if block_idx in self.fusion_map.keys():
@@ -149,15 +143,9 @@ class Adapter(nn.Module):
         outs = []
         out_layers = [8]
         loss_intra = 0
-        loss_lora = 0
         # self.fuse(0, x, clip_features, (h, w))
         for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
             x = block(x)  # (N, Q_L+L, D)
-
-            moe_out, moe_loss = self.lora_moe_layers[i](x)
-            x = x + moe_out
-            loss_lora += moe_loss
-            
             self.fuse(i, x, clip_features, (h, w))
             if not inference:  #train
                 loss_tmp_intra = self.intra_contra(i, x, data_dict['patch_label'], data_dict['label'], (h, w))
@@ -183,4 +171,4 @@ class Adapter(nn.Module):
             xray_preds.append(xray_pred)
             attn_biases.append(attn_bias)
 
-        return attn_biases, xray_preds, loss_intra, loss_lora
+        return attn_biases, xray_preds, loss_intra
