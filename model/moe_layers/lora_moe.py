@@ -115,7 +115,7 @@ class LoRA_MoElayer(nn.Module):
     k: an integer - how many experts to use for each batch element
     """
 
-    def __init__(self, dim, lora_dim=[8,16,32,48,64,96,128], noisy_gating=True, k=2): #
+    def __init__(self, dim, lora_dim=[8,16,32,48,64,96,128], noisy_gating=True, k=1): #
         super(LoRA_MoElayer, self).__init__()
 
         self.noisy_gating = noisy_gating
@@ -257,7 +257,9 @@ class LoRA_MoElayer(nn.Module):
         encourages all experts to be approximately equally used across a batch.
         """
         B, N, C = x.shape
+        # print("input shape:", x.shape)
         x = x.reshape(B*N,C)
+        # print("input memory (MB):", x.element_size() * x.numel() / (1024 ** 2))
         gates, load = self.noisy_top_k_gating(x, self.training)
         # calculate importance loss
         importance = gates.sum(0)
