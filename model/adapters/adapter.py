@@ -67,10 +67,10 @@ class Adapter(nn.Module):
         self.patch_conv = nn.Conv2d(in_channels=3, out_channels=self.num_features, kernel_size=16, stride=16,
                                     bias=True)
         print(f"num features: {self.num_features}")
-        # self.lora_moe_layers = nn.ModuleList([
-        #     LoRA_MoElayer(dim=self.num_features, lora_dim=[4,4]).to(self.device)
-        #     for _ in self.vit_model.blocks
-        # ])
+        self.lora_moe_layers = nn.ModuleList([
+            LoRA_MoElayer(dim=self.num_features).to(self.device)
+            for _ in self.vit_model.blocks
+        ])
 
     def fuse(self, block_idx, x, clip_features, spatial_shape):
         if block_idx in self.fusion_map.keys():
@@ -155,9 +155,9 @@ class Adapter(nn.Module):
         for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
             x = block(x)  # (N, Q_L+L, D)
 
-            # moe_out, moe_loss = self.lora_moe_layers[i](x)
-            # x = x + moe_out
-            # loss_lora += moe_loss
+            moe_out, moe_loss = self.lora_moe_layers[i](x)
+            x = x + moe_out
+            loss_lora += moe_loss
             
             self.fuse(i, x, clip_features, (h, w))
             if not inference:  #train

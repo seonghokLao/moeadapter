@@ -19,6 +19,10 @@ from torch import distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from trainer.metrics.utils import get_test_metrics
 from torch.nn import DataParallel
+
+from torch.cuda.amp import autocast, GradScaler
+
+
 FFpp_pool = ['FaceForensics++', ]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -43,6 +47,7 @@ class Trainer(object):
         self.config = config
         self.model = model
         self.optimizer = optimizer
+        self.scaler = GradScaler()
         self.scheduler = scheduler
         self.swa_model = swa_model
         self.writers = {}  # dict to maintain different tensorboard writers for each dataset and metric
@@ -194,16 +199,22 @@ class Trainer(object):
             return losses_first, pred_first
         else:
             self.optimizer.zero_grad()
+            # with autocast():
             predictions = self.model(data_dict)
             if type(self.model) is DDP:
                 losses = self.model.module.get_losses(data_dict, predictions)
             else:
                 losses = self.model.get_losses(data_dict, predictions)
+            # loss = losses['overall']
             #self.optimizer.zero_grad()
             losses['overall'].backward()
-            total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
-            print(f'Clipped grad norm: {total_norm:.2f}')
+            # total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
+            # print(f'Clipped grad norm: {total_norm:.2f}')
             self.optimizer.step()
+            # self.optimizer.zero_grad()
+            # self.scaler.scale(loss).backward()
+            # self.scaler.step(self.optimizer)
+            # self.scaler.update()
 
             return losses, predictions
 
@@ -237,6 +248,8 @@ class Trainer(object):
                     data_dict[key] = data_dict[key].to(device)
 
             losses, predictions = self.train_step(data_dict)
+            # predictions = {k: v.detach().cpu() if isinstance(v, torch.Tensor) else v for k, v in predictions.items()}
+            
             if 'SWA' in self.config and self.config['SWA'] and epoch > self.config['swa_start']:
                 self.swa_model.update_parameters(self.model)
 
@@ -246,10 +259,10 @@ class Trainer(object):
                 batch_metrics = self.model.get_train_metrics(data_dict, predictions)
 
             for name, value in batch_metrics.items():
-                train_recorder_metric[name].update(value)
+                train_recorder_metric[name].update(value.item() if torch.is_tensor(value) else value)
             ## store loss
             for name, value in losses.items():
-                train_recorder_loss[name].update(value)
+                train_recorder_loss[name].update(value.item() if torch.is_tensor(value) else value)
 
             # run tensorboard to visualize the training process
             if iteration % 300 == 0:
