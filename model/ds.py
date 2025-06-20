@@ -51,10 +51,10 @@ class DS(nn.Module):
         criterion = nn.CrossEntropyLoss()
         loss1 = criterion(pred.float(), label)
         if xray is not None:
-            xray_pred = xray_pred.detach()
+            # xray_pred = xray_pred.detach()
             loss_mse = F.mse_loss(xray_pred.squeeze().float(), xray.squeeze().float())  # (N 1 224 224)->(N 224 224)
 
-            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip + 20 * loss_lora
+            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip + 0.05 * loss_lora
 
 
             loss_dict = {
@@ -102,7 +102,7 @@ class DS(nn.Module):
     # @torch.autocast(device_type="cuda")
     def forward(self, data_dict, inference=False):
         images = data_dict['image']
-        print(images.dtype)
+        # print(images.dtype)
         clip_images = F.interpolate(
             images,
             size=(224, 224),
@@ -115,9 +115,9 @@ class DS(nn.Module):
 
         attn_biases, xray_preds, loss_adapter_intra, loss_lora = self.adapter(data_dict, clip_features,
                                                                                 inference)
-        attn_biases = [ab.detach() for ab in attn_biases]
-        xray_preds = [xp.detach() for xp in xray_preds]
-        loss_adapter_intra = loss_adapter_intra.detach()
+        # attn_biases = [ab.detach() for ab in attn_biases]
+        # xray_preds = [xp.detach() for xp in xray_preds]
+        # loss_adapter_intra = loss_adapter_intra.detach()
         # loss_lora = loss_lora.detach()
 
         clip_output, loss_clip = self.rec_attn_clip(data_dict, clip_features, attn_biases[-1], inference, normalize=True)

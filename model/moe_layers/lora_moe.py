@@ -258,9 +258,11 @@ class LoRA_MoElayer(nn.Module):
         """
         B, N, C = x.shape
         # print("input shape:", x.shape)
-        x = x.reshape(B*N,C)
+        # x = x.reshape(B*N,C)
+        x = torch.mean(x,dim=1,keepdim=False)
         # print("input memory (MB):", x.element_size() * x.numel() / (1024 ** 2))
         gates, load = self.noisy_top_k_gating(x, self.training)
+        print(load)
         # calculate importance loss
         importance = gates.sum(0)
         #
@@ -278,7 +280,8 @@ class LoRA_MoElayer(nn.Module):
             qkv_delta = F.linear(qkv_delta, self.Lora_b_experts[i].weight)
             expert_outputs.append(qkv_delta)
         y = dispatcher.combine(expert_outputs)
-        y = y.reshape(B,N,C)
+        # y = y.reshape(B,N,C)
+        y = y.unsqueeze(1)
         return y, loss
 
 

@@ -99,6 +99,9 @@ class DeepfakeAbstractBaseDataset(data.Dataset):
             one_data = config['test_dataset']
             # Test dataset should be evaluated separately. So collect only one dataset each time
             image_list, label_list = self.collect_img_and_label_for_one_dataset(one_data)
+            if len(image_list) > 6400:
+                indices = random.sample(range(len(image_list)), 6400)
+                image_list, label_list = [image_list[i] for i in indices], [label_list[i] for i in indices]
         else:
             raise NotImplementedError('Only train and test modes are supported.')
 

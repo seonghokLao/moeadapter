@@ -68,7 +68,7 @@ class Adapter(nn.Module):
                                     bias=True)
         print(f"num features: {self.num_features}")
         self.lora_moe_layers = nn.ModuleList([
-            LoRA_MoElayer(dim=self.num_features).to(self.device)
+            LoRA_MoElayer(dim=self.num_features, lora_dim=[8] * 16, k=4).to(self.device)
             for _ in self.vit_model.blocks
         ])
 
