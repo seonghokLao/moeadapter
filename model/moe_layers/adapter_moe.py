@@ -103,7 +103,166 @@ class SparseDispatcher(object):
         """
         return torch.split(self._nonzero_gates, self._part_sizes, dim=0)
 
-class LoRA_MoElayer(nn.Module):
+def createConvFunc(op_type):
+    assert op_type in ['cv', 'cd', 'ad', 'rd', 'scd'], 'unknown op type: %s' % str(op_type)
+    if op_type == 'cv':
+        return F.conv2d
+
+
+    if op_type == 'cd':
+        # center difference
+        def func(x, weights, bias=None, stride=1, padding=0, dilation=1, groups=1):
+            assert dilation in [1, 2], 'dilation for cd_conv should be in 1 or 2'
+            assert weights.size(2) == 3 and weights.size(3) == 3, 'kernel size for cd_conv should be 3x3'
+            assert padding == dilation, 'padding for cd_conv set wrong'
+
+            weights_c = weights.sum(dim=[2, 3]) - weights[:,:,1,1]
+            weights_c = weights_c[:,:,None,None]
+            yc = F.conv2d(x, weights_c, stride=stride, padding=0, groups=groups)
+            y = F.conv2d(x, weights, bias, stride=stride, padding=padding, dilation=dilation, groups=groups)
+            return y - yc
+        return func
+    elif op_type == 'ad':
+        # angular difference
+        def func(x, weights, bias=None, stride=1, padding=0, dilation=1, groups=1):
+            assert dilation in [1, 2], 'dilation for ad_conv should be in 1 or 2'
+            assert weights.size(2) == 3 and weights.size(3) == 3, 'kernel size for ad_conv should be 3x3'
+            assert padding == dilation, 'padding for ad_conv set wrong'
+
+            shape = weights.shape
+            weights = weights.view(shape[0], shape[1], -1)
+            weights_c = weights[:, :, [3, 0, 1, 6, 4, 2, 7, 8, 5]]
+            weights_c[:,:,4] = weights[:,:,4]*0
+            weights_conv = (weights -weights_c).view(shape) # clock-wise
+            y = F.conv2d(x, weights_conv, bias, stride=stride, padding=padding, dilation=dilation, groups=groups)
+            return y
+        return func
+    elif op_type == 'rd':
+        # neibor difference
+        def func(x, weights, bias=None, stride=1, padding=0, dilation=1, groups=1):
+            assert dilation in [1, 2], 'dilation for rd_conv should be in 1 or 2'
+            assert weights.size(2) == 3 and weights.size(3) == 3, 'kernel size for rd_conv should be 3x3'
+            padding = 2 * dilation
+
+            shape = weights.shape
+            if weights.is_cuda:
+                buffer = torch.cuda.FloatTensor(shape[0], shape[1], 5 * 5).fill_(0)
+            else:
+                buffer = torch.zeros(shape[0], shape[1], 5 * 5)
+            weights = weights.view(shape[0], shape[1], -1)
+            buffer[:, :, [0, 2, 4, 10, 14, 20, 22, 24]] = weights[:, :, 1:]
+            buffer[:, :, [6, 7, 8, 11, 13, 16, 17, 18]] = -weights[:, :, 1:]
+            buffer[:, :, 12] = weights[:, :, 0]
+            buffer = buffer.view(shape[0], shape[1], 5, 5)
+            y = F.conv2d(x, buffer, bias, stride=stride, padding=padding, dilation=dilation, groups=groups)
+            return y
+        return func
+    elif op_type == 'scd':
+        # second-order center difference
+        def func(x, weights, bias=None, stride=1, padding=0, dilation=1, groups=1):
+            assert dilation in [1, 2], 'dilation for rd_conv should be in 1 or 2'
+            assert weights.size(2) == 3 and weights.size(3) == 3, 'kernel size for rd_conv should be 3x3'
+            padding = 2 * dilation
+
+            shape = weights.shape
+            if weights.is_cuda:
+                buffer = torch.cuda.FloatTensor(shape[0], shape[1], 5 * 5).fill_(0)
+            else:
+                buffer = torch.zeros(shape[0], shape[1], 5 * 5)
+            weights = weights.view(shape[0], shape[1], -1)
+            buffer[:, :, [0, 2, 4, 10, 14, 20, 22, 24]] = weights[:, :, 1:]
+            buffer[:, :, [6, 7, 8, 11, 13, 16, 17, 18]] = -weights[:, :, 1:] * 2
+            buffer[:, :, 12] = weights.sum(dim=[2])
+            buffer = buffer.view(shape[0], shape[1], 5, 5)
+            y = F.conv2d(x, buffer, bias, stride=stride, padding=padding, dilation=dilation, groups=groups)
+            return y
+        return func
+    else:
+        print('impossible to be here unless you force that')
+        return None
+    
+class Conv2d_Diff(nn.Module):
+    '''
+    model = Conv2d_Diff(3,5,3,1,1,op_type='scd')
+    '''
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=False,op_type='cv'):
+        super(Conv2d_Diff, self).__init__()
+        assert op_type in ['cv', 'cd', 'ad', 'rd', 'scd'], 'unknown op type: %s' % str(op_type)
+        if in_channels % groups != 0:
+            raise ValueError('in_channels must be divisible by groups')
+        if out_channels % groups != 0:
+            raise ValueError('out_channels must be divisible by groups')
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.weight = nn.Parameter(torch.Tensor(out_channels, in_channels // groups, kernel_size, kernel_size))
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+        self.func = createConvFunc(op_type)
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input):
+        out = self.func(input, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        return out
+
+class QuickGELU(nn.Module):
+    def forward(self, x: torch.Tensor):
+        return x * torch.sigmoid(1.702 * x)
+    
+class Conv2d_Adapter(nn.Module):
+    def __init__(self, dim, adapter_dim, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, op_type='cv'):
+        super(Conv2d_Adapter, self).__init__()
+
+        self.adapter_down = nn.Linear(dim, adapter_dim)  # equivalent to 1 * 1 Conv
+        self.adapter_up = nn.Linear(adapter_dim, dim)  # equivalent to 1 * 1 Conv
+        nn.init.xavier_uniform_(self.adapter_down.weight)
+        nn.init.zeros_(self.adapter_down.bias)
+        nn.init.zeros_(self.adapter_up.weight)
+        nn.init.zeros_(self.adapter_up.bias)
+
+        self.adapter_dim = adapter_dim
+        self.adapter_conv = Conv2d_Diff(adapter_dim, adapter_dim, kernel_size, stride, padding, dilation, groups, bias,op_type)
+        nn.init.zeros_(self.adapter_conv.weight)
+        self.adapter_conv.weight.data[:, :, 1, 1] += torch.eye(adapter_dim, dtype=torch.float)
+
+    def forward(self, x):
+        B, N, C = x.shape
+
+        x_down = self.adapter_down(x)  # equivalent to 1 * 1 Conv
+
+        patch_len = x_down.shape[1] - 1
+        H = W = int(patch_len ** 0.5)
+        assert H * W == patch_len, f"Patch token count ({patch_len}) is not a perfect square!"
+
+        x_patch = x_down[:, 1:].reshape(B, H, W, self.adapter_dim).permute(0, 3, 1, 2)
+        # x_patch = x_down[:, 1:].reshape(B, 14, 14, self.adapter_dim).permute(0, 3, 1, 2)
+        x_patch = self.adapter_conv(x_patch)
+        x_patch = x_patch.permute(0, 2, 3, 1).reshape(B, 14 * 14, self.adapter_dim)
+
+        x_cls = x_down[:, :1].reshape(B, 1, 1, self.adapter_dim).permute(0, 3, 1, 2)
+        x_cls = self.adapter_conv(x_cls)
+        x_cls = x_cls.permute(0, 2, 3, 1).reshape(B, 1, self.adapter_dim)
+
+        x_down = torch.cat([x_cls, x_patch], dim=1)
+
+        x_up = self.adapter_up(x_down)  # equivalent to 1 * 1 Conv
+
+        return x_up
+
+class Adapter_MoElayer(nn.Module):
 
     """Call a Sparsely gated mixture of experts layer with 1-layer Feed-Forward networks as experts.
     Args:
@@ -113,32 +272,28 @@ class LoRA_MoElayer(nn.Module):
     hidden_size: an integer - hidden size of the experts
     noisy_gating: a boolean
     k: an integer - how many experts to use for each batch element
+    ['cv', 'cd', 'ad', 'rd', 'scd']
     """
 
-    def __init__(self, dim, lora_dim=[8,16,32,48,64,96,128], noisy_gating=True, k=1): #
-        super(LoRA_MoElayer, self).__init__()
-
+    def __init__(self, dim=768, adapter_dim=8,adapter_type=['cv', 'cd', 'ad', 'rd', 'scd'],noisy_gating=True, k=1):
+        super(Adapter_MoElayer, self).__init__()
         self.noisy_gating = noisy_gating
+        self.num_experts = len(adapter_type)
+        self.dim = dim
         self.k = k
+        self.identity = nn.Identity()
 
-        # instantiate lora experts
-        Lora_a_experts = nn.ModuleList()
-        Lora_b_experts = nn.ModuleList()
-        for i,d in enumerate(lora_dim):
-            Lora_a_experts.append(nn.Linear(dim, d,bias = False))
-            nn.init.kaiming_uniform_(Lora_a_experts[i].weight, a=math.sqrt(5))
-            Lora_b_experts.append(nn.Linear(d, dim,bias = False))
-            nn.init.zeros_(Lora_b_experts[i].weight)
+        adapter_experts = nn.ModuleList()
+        for t in adapter_type:
+            adapter_experts.append(Conv2d_Adapter(dim=dim,adapter_dim=adapter_dim,kernel_size=3,stride=1,padding=1,bias=True,op_type=t))
 
-        # define lora param
-        self.num_experts = len(Lora_a_experts)
-        self.Lora_a_experts = Lora_a_experts
-        self.Lora_b_experts = Lora_b_experts
-        self.w_gate = nn.Parameter(torch.zeros(dim, len(Lora_a_experts)), requires_grad=True) # here we need avg token dim
-        self.w_noise = nn.Parameter(torch.zeros(dim, len(Lora_a_experts)), requires_grad=True)
+        # define adapter param
+        self.num_experts = len(adapter_experts)
+        self.adapter_experts = adapter_experts
+        self.w_gate = nn.Parameter(torch.zeros(dim,  self.num_experts), requires_grad=True)
+        self.w_noise = nn.Parameter(torch.zeros(dim,  self.num_experts), requires_grad=True)
         self.register_buffer("mean", torch.tensor([0.0]))
         self.register_buffer("std", torch.tensor([1.0]))
-
 
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(1)
@@ -156,7 +311,6 @@ class LoRA_MoElayer(nn.Module):
         a `Scalar`.
         """
         eps = 1e-10
-        # if only num_experts = 1
 
         if x.shape[0] == 1:
             return torch.tensor([0], device=x.device, dtype=x.dtype)
@@ -171,7 +325,6 @@ class LoRA_MoElayer(nn.Module):
         a float32 `Tensor` of shape [n]
         """
         return (gates > 0).sum(0)
-
 
     def _prob_in_top_k(self, clean_values, noisy_values, noise_stddev, noisy_top_values):
         """Helper function to NoisyTopKGating.
@@ -201,12 +354,10 @@ class LoRA_MoElayer(nn.Module):
         threshold_if_out = torch.unsqueeze(torch.gather(top_values_flat, 0, threshold_positions_if_out), 1)
         # is each value currently in the top k.
         normal = Normal(self.mean, self.std)
-        eps = 1e-6
-        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev.clamp(min=eps))
-        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev.clamp(min=eps))
+        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev)
+        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev)
         prob = torch.where(is_in, prob_if_in, prob_if_out)
         return prob
-
 
     def noisy_top_k_gating(self, x, train, noise_epsilon=1e-2):
         """Noisy top-k gating.
@@ -227,9 +378,6 @@ class LoRA_MoElayer(nn.Module):
             logits = noisy_logits
         else:
             logits = clean_logits
-
-
-        # calculate topk + 1 that will be needed for the noisy gates
         top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=1)
         top_k_logits = top_logits[:, :self.k]
         top_k_indices = top_indices[:, :self.k]
@@ -246,7 +394,6 @@ class LoRA_MoElayer(nn.Module):
 
     def forward(self, x, loss_coef=1):
         """Args:
-        x: tensor shape [batch_size, input_size]
         train: a boolean scalar.
         loss_coef: a scalar - multiplier on load-balancing losses
 
@@ -256,13 +403,11 @@ class LoRA_MoElayer(nn.Module):
         training loss of the model.  The backpropagation of this loss
         encourages all experts to be approximately equally used across a batch.
         """
-        B, N, C = x.shape
-        # print("input shape:", x.shape)
-        # x = x.reshape(B*N,C)
-        x = torch.mean(x,dim=1,keepdim=False)
-        # print("input memory (MB):", x.element_size() * x.numel() / (1024 ** 2))
-        gates, load = self.noisy_top_k_gating(x, self.training)
-        # print("Gate values:", gates[0])
+        B, N, _ = x.shape
+        x_global = torch.mean(x,dim=1,keepdim=False)
+
+        gates, load = self.noisy_top_k_gating(x_global, self.training)
+
         # calculate importance loss
         importance = gates.sum(0)
         #
@@ -271,18 +416,18 @@ class LoRA_MoElayer(nn.Module):
 
         dispatcher = SparseDispatcher(self.num_experts, gates)
         expert_inputs = dispatcher.dispatch(x)
-        gates = dispatcher.expert_to_gates()
 
+        gates = dispatcher.expert_to_gates()
         expert_outputs = []
         for i in range(self.num_experts):
             if len(expert_inputs[i]) == 0: continue
-            qkv_delta = F.linear(expert_inputs[i], self.Lora_a_experts[i].weight)
-            #activation
-            qkv_delta = F.linear(qkv_delta, self.Lora_b_experts[i].weight)
-            expert_outputs.append(qkv_delta)
+            expert_output =  self.adapter_experts[i](expert_inputs[i])
+            expert_output = expert_output.reshape(expert_output.size(0), 197*self.dim)
+            expert_outputs.append(expert_output)
+
         y = dispatcher.combine(expert_outputs)
-        # y = y.reshape(B,N,C)
-        y = y.unsqueeze(1)
+        y = y.reshape(B, 197, self.dim)
+
         return y, loss
 
 

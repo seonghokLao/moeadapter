@@ -10,7 +10,7 @@ task_target: " "
 save_avg: True
 #queue_size: 2048
 #random_k: 256
-loss_rate: "10 * loss1 +  200 * loss_mse + 20* loss_intra + 10 *loss_inter + 0.05 * loss_lora"
+loss_rate: "10 * loss1 +  200 * loss_mse + 20* loss_intra + 10 *loss_inter + 0.05 * loss_moe"
 vit_name: 'vit_tiny_patch16_224'
 train_set: 'ori'
 num_quires: 128
@@ -24,6 +24,9 @@ device: 'cuda:0'
 mlp_dim: 256
 mlp_out_dim: 128
 head_num: 16  # for  clip_model_name: "ViT-L/14"
+adapter_dim: 8
+k: 1
+noise_epsilon: 0.01
 # dataset
 all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
 train_dataset: [FaceForensics++]
