@@ -66,7 +66,7 @@ class Adapter(nn.Module):
         self.ln_pre = VT_LN(self.num_features)
         self.patch_conv = nn.Conv2d(in_channels=3, out_channels=self.num_features, kernel_size=16, stride=16,
                                     bias=True)
-        print(self.num_features)
+        # print(self.num_features)
         self.adapter_moe_layers = nn.ModuleList([
             Adapter_MoElayer(dim=self.num_features).to(self.device)
             for _ in self.vit_model.blocks
@@ -131,6 +131,7 @@ class Adapter(nn.Module):
         image = data_dict['image']
         x = self.patch_conv(image)
         x = x.reshape(x.shape[0], x.shape[1], -1)
+        # print("x.shape",x.shape)
         x = x.permute(0, 2, 1)
 
         pos_embed = self.vit_model.pos_embed  # (N L D)
@@ -147,6 +148,7 @@ class Adapter(nn.Module):
         x = torch.cat([self.query_embed.expand(x.shape[0], -1, -1), x], dim=1)  # (N ,Q_L+L,D)
         x = x + pos_embed
         x = self.ln_pre(x)
+        print("x.shape",x.shape)
         outs = []
         out_layers = [8]
         loss_intra = 0

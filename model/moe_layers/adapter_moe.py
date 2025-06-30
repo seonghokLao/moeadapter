@@ -239,18 +239,16 @@ class Conv2d_Adapter(nn.Module):
         self.adapter_conv.weight.data[:, :, 1, 1] += torch.eye(adapter_dim, dtype=torch.float)
 
     def forward(self, x):
+        x = x[:, -196:, :]
         B, N, C = x.shape
+
+        h, w = 16, 16
 
         x_down = self.adapter_down(x)  # equivalent to 1 * 1 Conv
 
-        patch_len = x_down.shape[1] - 1
-        H = W = int(patch_len ** 0.5)
-        assert H * W == patch_len, f"Patch token count ({patch_len}) is not a perfect square!"
-
-        x_patch = x_down[:, 1:].reshape(B, H, W, self.adapter_dim).permute(0, 3, 1, 2)
-        # x_patch = x_down[:, 1:].reshape(B, 14, 14, self.adapter_dim).permute(0, 3, 1, 2)
+        x_patch = x_down[:, 1:].reshape(B, h, w, self.adapter_dim).permute(0, 3, 1, 2)
         x_patch = self.adapter_conv(x_patch)
-        x_patch = x_patch.permute(0, 2, 3, 1).reshape(B, 14 * 14, self.adapter_dim)
+        x_patch = x_patch.permute(0, 2, 3, 1).reshape(B, h * w, self.adapter_dim)
 
         x_cls = x_down[:, :1].reshape(B, 1, 1, self.adapter_dim).permute(0, 3, 1, 2)
         x_cls = self.adapter_conv(x_cls)

@@ -150,14 +150,14 @@ class Adapter(nn.Module):
         outs = []
         out_layers = [8]
         loss_intra = 0
-        loss_lora = 0
+        loss_moe = 0
         # self.fuse(0, x, clip_features, (h, w))
         for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
             x = block(x)  # (N, Q_L+L, D)
 
             moe_out, moe_loss = self.lora_moe_layers[i](x)
             x = x + moe_out
-            loss_lora += moe_loss
+            loss_moe += moe_loss
             
             self.fuse(i, x, clip_features, (h, w))
             if not inference:  #train
@@ -184,4 +184,4 @@ class Adapter(nn.Module):
             xray_preds.append(xray_pred)
             attn_biases.append(attn_bias)
 
-        return attn_biases, xray_preds, loss_intra, loss_lora
+        return attn_biases, xray_preds, loss_intra, loss_moe
