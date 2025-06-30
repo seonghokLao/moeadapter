@@ -239,8 +239,9 @@ class Conv2d_Adapter(nn.Module):
         self.adapter_conv.weight.data[:, :, 1, 1] += torch.eye(adapter_dim, dtype=torch.float)
 
     def forward(self, x):
-        x = x[:, -196:, :]
+        x = x[:, -257:, :]
         B, N, C = x.shape
+        # print(x.shape)
 
         h, w = 16, 16
 
@@ -420,11 +421,15 @@ class Adapter_MoElayer(nn.Module):
         for i in range(self.num_experts):
             if len(expert_inputs[i]) == 0: continue
             expert_output =  self.adapter_experts[i](expert_inputs[i])
-            expert_output = expert_output.reshape(expert_output.size(0), 197*self.dim)
+            B, N, D = expert_output.shape
+
+            # expert_output = expert_output.reshape(expert_output.size(0), 197*self.dim)
+            expert_output = expert_output.reshape(B, N*D)
             expert_outputs.append(expert_output)
 
         y = dispatcher.combine(expert_outputs)
-        y = y.reshape(B, 197, self.dim)
+        # y = y.reshape(B, 197, self.dim)
+        y = y.reshape(B, N, self.dim)
 
         return y, loss
 
