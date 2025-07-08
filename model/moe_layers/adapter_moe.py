@@ -241,7 +241,7 @@ class Conv2d_Adapter(nn.Module):
     def forward(self, x):
         x = x[:, -257:, :]
         B, N, C = x.shape
-        # print(x.shape)
+        print(x.shape)
 
         h, w = 16, 16
 
@@ -421,10 +421,10 @@ class Adapter_MoElayer(nn.Module):
         for i in range(self.num_experts):
             if len(expert_inputs[i]) == 0: continue
             expert_output =  self.adapter_experts[i](expert_inputs[i])
-            B, N, D = expert_output.shape
+            b, n, d = expert_output.shape
 
             # expert_output = expert_output.reshape(expert_output.size(0), 197*self.dim)
-            expert_output = expert_output.reshape(B, N*D)
+            expert_output = expert_output.reshape(b, n*self.dim)
             expert_outputs.append(expert_output)
 
         y = dispatcher.combine(expert_outputs)

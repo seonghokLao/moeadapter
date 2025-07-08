@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from model.layer import Fusion, MLP, PatchEmbed, VT_LN
 from functools import partial
 
-from model.moe_layers.lora_moe import LoRA_MoElayer
+from model.moe_layers.proto_lora_moe import LoRA_MoElayer
 
 
 class Mask_Decoder(nn.Module):

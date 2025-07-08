@@ -3,7 +3,7 @@ from sklearn import metrics
 from torch import nn
 from model.clip.clip import load
 import torch
-from model.adapters.adapter import Adapter
+from model.adapters.adapter_loramoe import Adapter
 from .attn import RecAttnClip
 from .layer import PostClipProcess, MaskPostXrayProcess
 import torch.nn.functional as F

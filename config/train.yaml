@@ -43,7 +43,7 @@ test_dataset: [Celeb-DF-v1 ,Celeb-DF-v2, DFDCP, DFDC, DeepFakeDetection]
 dataset_json_folder: '/home/laoseonghok/github/DeepfakeBench/preprocessing/dataset_json'
 
 compression: c23  # compression-level for videos
-train_batchSize: 40   # training batch size
+train_batchSize: 32   # training batch size
 test_batchSize: 64   # test batch size
 workers: 8   # number of data loading workers
 frame_num: {'train': 32, 'test': 32}   # number of frames to use per video in training and testing
