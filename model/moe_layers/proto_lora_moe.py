@@ -73,7 +73,7 @@ class SparseDispatcher(object):
         inp_exp = inp[self._batch_index].squeeze(1)
         return torch.split(inp_exp, self._part_sizes, dim=0)
 
-    def combine(self, expert_out, multiply_by_gates=False):
+    def combine_v0(self, expert_out, multiply_by_gates=False):
         """Sum together the expert output, weighted by the gates.
         The slice corresponding to a particular batch element `b` is computed
         as the sum over all experts `i` of the expert output, weighted by the
@@ -96,6 +96,28 @@ class SparseDispatcher(object):
         combined = zeros.index_add(0, self._batch_index, stitched.float())
         combined[combined == 0] = np.finfo(float).eps
         return combined.log()
+    
+    def combine(self, expert_out, multiply_by_gates=False):
+        # log-space stitched output
+        out = torch.cat(expert_out, 0)  # [N, D]
+        if multiply_by_gates:
+            out = out + torch.log(self._nonzero_gates.to(out.dtype) + 1e-20)
+
+        idx, B, D = self._batch_index, self._gates.size(0), out.size(1)
+
+        # per-batch maximum  (for log-sum-exp stability)
+        max_b = out.new_full((B, D), -float('inf'))  # [B, D]
+
+        for b in torch.unique(idx):
+            max_b[b] = out[idx == b].max(dim=0).values
+
+        # stable exponentiation and summation
+        exp_shift = (out - max_b[idx]).exp()  # ≤ 1
+        sum_exp = out.new_zeros((B, D))
+        sum_exp.index_add_(0, idx, exp_shift.to(sum_exp.dtype))  # Σ_i exp(…)
+        sum_exp.clamp_(min=torch.finfo(sum_exp.dtype).eps)  # avoid log(0)
+
+        return max_b + sum_exp.log()  # log-space result
 
     def expert_to_gates(self):
         """Gate values corresponding to the examples in the per-expert `Tensor`s.
@@ -247,7 +269,7 @@ class LoRA_MoElayer(nn.Module):
         for i in range(self.num_experts):
             weights = gates[:, i].unsqueeze(1)
             if weights.sum() > 0:
-                proto_update = (weights * x).sum(0) / weights.sum()
+                proto_update = (weights * x).sum(0) / weights.sum().clamp(min=1e-6)
                 self.prototypes[i] = self.momentum * self.prototypes[i] + (1 - self.momentum) * proto_update
 
     def forward(self, x, loss_coef=1):
