@@ -164,7 +164,10 @@ class DS(nn.Module):
             self.correct += correct
             self.total += data_dict['label'].size(0)
 
-        if torch.isnan(pred_dict['prob']).any():
+        if torch.isnan(outputs['clip_cls_output']).any():
+            print("NaN in outputs['clip_cls_output']")
+            print("outputs['clip_cls_output']:", outputs['clip_cls_output'])
+        if torch.isnan(prob).any():
             print("NaN in prob output")
             print("Raw logits:", outputs['clip_cls_output'])
             raise ValueError("Nans found in model output (prob)")

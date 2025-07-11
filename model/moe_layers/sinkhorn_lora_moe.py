@@ -144,7 +144,7 @@ class LoRA_MoElayer(nn.Module):
 
         self.noisy_gating = noisy_gating
         self.k = k
-        self.momentum = 0.99
+        self.momentum = 0.999
         self.kappa = 0.025
 
         # instantiate lora experts
@@ -233,34 +233,52 @@ class LoRA_MoElayer(nn.Module):
         prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev.clamp(min=eps))
         prob = torch.where(is_in, prob_if_in, prob_if_out)
         return prob
-    
 
-    def prototype_topk_routing(self, x):
-        """Route inputs to experts based on the distance to the prototypes.
-        Args:
-        x: a `Tensor` of shape [batch_size, input_size]
-        Returns:
-        a `Tensor` of shape [batch_size, num_experts] with routing probabilities.
+    def sinkhorn(self, log_alpha, num_iters=3, epsilon=1e-6):
         """
-        x_norm = F.normalize(x, dim=1)  # [B, D]
-        p_norm = F.normalize(self.prototypes, dim=1)  # [K, D]
-        similarity = torch.mm(x_norm, p_norm.T)  # [B, K]
+        log_alpha: [K, N]
+        Returns doubly-stochastic matrix L: [K, N]
+        """
+        L = torch.exp(log_alpha)
+        K, B = L.shape
+        # L = L / L.sum()  # Normalize sum to 1, as in the paper
 
-        topk_values, topk_indices = torch.topk(similarity, self.k, dim=1)  # [B, K]
+        for _ in range(num_iters):
+            L = L / (L.sum(dim=1, keepdim=True) + epsilon)
+            L = L / (L.sum(dim=0, keepdim=True) + epsilon)
 
-        topk_gates = F.softmax(topk_values, dim=1)  # [B, K]
+        return L
 
-        gates = torch.zeros(x.size(0), self.num_experts, device=x.device, dtype=x.dtype)
-        gates.scatter_(1, topk_indices, topk_gates)  # [B, K]
-        return gates
+    def sinkhorn_routing(self, x):
 
+        """
+        x: [B, D] inputs
+        prototypes: [K, D] expert centroids
+        """
+        x_norm = F.normalize(x, dim=-1)
+        p_norm = F.normalize(self.prototypes, dim=-1)
+
+        similarity = torch.matmul(p_norm, x_norm.T)
+        log_alpha = similarity / self.kappa
+
+        L = self.sinkhorn(log_alpha)
+        return L.T
     
     def update_prototypes(self, x, gates):
-        for i in range(self.num_experts):
-            weights = gates[:, i].unsqueeze(1)
-            if weights.sum() > 0:
-                proto_update = (weights * x).sum(0) / weights.sum().clamp(min=1e-6)
-                self.prototypes[i] = self.momentum * self.prototypes[i] + (1 - self.momentum) * proto_update
+        gates = F.softmax(gates, dim=0)
+        # self.prototypes = self.momentum * self.prototypes + (1 - self.momentum) * gates.T@x
+
+        # weights = gates / (gates.sum(dim=0, keepdim=True) + 1e-6)  # [B, K]
+        # Weighted sum for each expert
+        new_protos = gates.T@x  # [K, D]
+        # EMA update
+        self.prototypes.data.mul_(self.momentum).add_((1 - self.momentum) * new_protos)
+
+        # for i in range(self.num_experts):
+        #     weights = gates[:, i].unsqueeze(1)
+        #     if weights.sum() > 0:
+        #         proto_update = (weights * x).sum(0) / weights.sum().clamp(min=1e-6)
+        #         self.prototypes[i] = self.momentum * self.prototypes[i] + (1 - self.momentum) * proto_update
 
     def forward(self, x, loss_coef=1):
         """Args:
@@ -278,11 +296,11 @@ class LoRA_MoElayer(nn.Module):
         x_mean = torch.mean(x, dim=1, keepdim=False)
 
         with torch.no_grad():
-            gates = self.prototype_topk_routing(x_mean.detach())
+            gates = self.sinkhorn_routing(x_mean.detach())
             assert (gates.sum(dim=1) > 0).all(), f"Some samples have no expert assignment: {gates}"
-            # assert (gates.sum(dim=0) > 0).all(), f"Some experts have no assignments: {gates}"
+            assert (gates.sum(dim=0) > 0).all(), f"Some experts have no assignments: {gates}"
             self.update_prototypes(x_mean, gates)
-        # print(gates)
+        print(gates)
 
         dispatcher = SparseDispatcher(self.num_experts, gates)
         expert_inputs = dispatcher.dispatch(x_mean)

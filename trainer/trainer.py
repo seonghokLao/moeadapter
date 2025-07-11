@@ -375,7 +375,8 @@ class Trainer(object):
             # Save checkpoint, feature, and metrics if specified in config
             
             self.save_metrics('test', metric_one_dataset, key)
-        if self.config['save_ckpt'] and key not in FFpp_pool:
+        # if self.config['save_ckpt'] and key not in FFpp_pool:
+        if self.config['save_ckpt'] and key == 'avg':
             self.save_ckpt('test', key, f"{epoch}+{iteration}")
         
         if losses_one_dataset_recorder is not None:
