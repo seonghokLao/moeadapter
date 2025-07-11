@@ -113,7 +113,7 @@ class DS(nn.Module):
 
         clip_features = self.clip_model.extract_features(clip_images, self.adapter.fusion_map.values())
 
-        attn_biases, xray_preds, loss_adapter_intra, loss_moe = self.adapter(data_dict, clip_features,
+        attn_biases, xray_preds, loss_adapter_intra, loss_moe, block_features = self.adapter(data_dict, clip_features,
                                                                                 inference)
         # attn_biases = [ab.detach() for ab in attn_biases]
         # xray_preds = [xp.detach() for xp in xray_preds]
@@ -140,7 +140,8 @@ class DS(nn.Module):
             'xray_pred': outputs['xray_pred'],
             'loss_intra': loss_adapter_intra,
             'loss_clip':loss_clip,
-            'loss_moe':loss_moe
+            'loss_moe':loss_moe,
+            'block_features': block_features
         }
 
         if inference:

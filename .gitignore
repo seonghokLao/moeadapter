@@ -4,3 +4,4 @@ weights/
 config/train.yaml
 config/test.yaml
 launch.json
+ckpt_best.pth

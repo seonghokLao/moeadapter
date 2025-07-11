@@ -10,6 +10,9 @@ import torch
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.utils.data
+from cuml.cluster import KMeans as cuKMeans
+import cupy as cp
+from sklearn.metrics import silhouette_score
 
 from dataset.abstract_dataset import DeepfakeAbstractBaseDataset
 from model.ds import DS
@@ -25,7 +28,7 @@ parser.add_argument('--weights_path', type=str,
                     #  ds_ _2024-12-20-21-48-57ds_ _2024-12-30-18-07-52
                     #ds_ _2024-12-22-15-55-57 FFIW 83 71  WDF auc: 0.8351 video_auc: 0.8747 DF10  video_auc: 0.98225  auc: 0.961988821
                     #ds_ _2024-12-26-16-47-41  WDF 85 86   DF10 0.95505  video_auc: 0.97841
-                    default='/home/laoseonghok/github/moeadapter/logs/new/ds_ _2025-06-10-03-48-46/test/avg/ckpt_best019139.pth')  #
+                    default='ckpt_best.pth')  #
 #parser.add_argument("--lmdb", action='store_true', default=False)
 args = parser.parse_args()
 
@@ -77,6 +80,8 @@ def test_one_dataset(model, data_loader):
     prediction_lists = []
     #feature_lists = []
     label_lists = []
+    block_features_all = [[] for _ in range(len(model.adapter.vit_model.blocks))]
+
     for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
         # get data
         data, label, mask, landmark = \
@@ -94,8 +99,10 @@ def test_one_dataset(model, data_loader):
         label_lists += list(data_dict['label'].cpu().detach().numpy())
         prediction_lists += list(predictions['prob'].cpu().detach().numpy())
         #feature_lists += list(predictions['feat'].cpu().detach().numpy())
+        for block_idx, block_feat in enumerate(predictions['block_features']):
+            block_features_all[block_idx].append(block_feat)
     
-    return np.array(prediction_lists), np.array(label_lists)#,np.array(feature_lists)
+    return np.array(prediction_lists), np.array(label_lists), block_features_all#,np.array(feature_lists)
     
 def test_epoch(model, test_data_loaders):
     # set model to eval mode
@@ -104,12 +111,14 @@ def test_epoch(model, test_data_loaders):
     # define test recorder
     metrics_all_datasets = {}
 
+    block_features_dataset = None
+
     # testing for all test data
     keys = test_data_loaders.keys()
     for key in keys:
         data_dict = test_data_loaders[key].dataset.data_dict
         # compute loss for each dataset
-        predictions_nps, label_nps = test_one_dataset(model, test_data_loaders[key])
+        predictions_nps, label_nps, block_features_dataset = test_one_dataset(model, test_data_loaders[key])
         print(f'name {data_dict.keys()}')
         # compute metric for each dataset
         metric_one_dataset = get_test_metrics(y_pred=predictions_nps, y_true=label_nps,
@@ -120,6 +129,32 @@ def test_epoch(model, test_data_loaders):
         tqdm.write(f"dataset: {key}")
         for k, v in metric_one_dataset.items():
             tqdm.write(f"{k}: {v}")
+    
+    for block_idx, features_tensor in enumerate(block_features_dataset):
+        features = torch.cat(features_tensor, dim=0)
+        features = features.reshape(-1, features.shape[-1])
+
+        features_cupy = cp.asarray(features)  # Convert to cupy array for cuML compatibility
+
+        print(features.device)
+        best_n_clusters = 2
+        best_score = -1
+        best_centers = None
+
+        # Try cluster numbers from 2 to 12
+        for n_clusters in range(2, 13):
+            print(f"Clustering block {block_idx} with n_clusters={n_clusters} ...")
+            kmeans = cuKMeans(n_clusters=n_clusters)
+            labels = kmeans.fit_predict(features)
+            score = silhouette_score(features.cpu().numpy(), labels.get() if hasattr(labels, 'get') else labels)
+            print(f"Block {block_idx}, n_clusters={n_clusters}, silhouette={score:.4f}")
+            if score > best_score:
+                best_score = score
+                best_n_clusters = n_clusters
+                best_centers = kmeans.cluster_centers_
+
+        torch.save(torch.tensor(best_centers, dtype=torch.float32), f"model/clusters/vit_block{block_idx}_n{best_n_clusters}.pt")
+        print(f"Block {block_idx}: optimal clusters={best_n_clusters}, silhouette={best_score:.4f}")
 
     return metrics_all_datasets
 
@@ -152,42 +187,34 @@ def main():
     # prepare the testing data loader
     test_data_loaders = prepare_testing_data(config)
 
-    import os, glob
-    if os.path.isdir(weights_path):
-        weight_files = sorted(glob.glob(os.path.join(args.weights_path, '*.pth')))
-    else:
-        weight_files = [weights_path]
-
-    for weight_path in weight_files:
     # prepare the model (detector)
-        print(f'\n=== Testing checkpoint: {weight_path} ===')
 
-        model = DS(clip_name=config['clip_model_name'],
-                adapter_vit_name=config['vit_name'],
-                num_quires=config['num_quires'],
-                fusion_map=config['fusion_map'],
-                mlp_dim=config['mlp_dim'],
-                mlp_out_dim=config['mlp_out_dim'],
-                head_num=config['head_num'],
-                device=config['device'])
+    model = DS(clip_name=config['clip_model_name'],
+               adapter_vit_name=config['vit_name'],
+               num_quires=config['num_quires'],
+               fusion_map=config['fusion_map'],
+               mlp_dim=config['mlp_dim'],
+               mlp_out_dim=config['mlp_out_dim'],
+               head_num=config['head_num'],
+               device=config['device'])
+    epoch = 0
+    #weights_paths = [
+    #                 '/data/cuixinjie/DsClip_L_V2/logs/ds_ _2024-09-25-14-26-04/test/avg/ckpt_best.pth',
+    #                ]
+
+    try:
+        epoch = int(weights_path.split('/')[-1].split('.')[0].split('_')[2])
+    except:
         epoch = 0
-        #weights_paths = [
-        #                 '/data/cuixinjie/DsClip_L_V2/logs/ds_ _2024-09-25-14-26-04/test/avg/ckpt_best.pth',
-        #                ]
+        ckpt = torch.load(weights_path, map_location=device)
+        model.load_state_dict(ckpt, strict=False)
+        model.to(device)
 
-        try:
-            epoch = int(weight_path.split('/')[-1].split('.')[0].split('_')[2])
-        except:
-            epoch = 0
-            ckpt = torch.load(weight_path, map_location=device)
-            model.load_state_dict(ckpt, strict=False)
-            model.to(device)
+        print(f'===> Load {weights_path} done!')
 
-            print(f'===> Load {weight_path} done!')
-
-            # start testing
-            best_metric = test_epoch(model, test_data_loaders)
-            print('===> Test Done!')
+        # start testing
+        best_metric = test_epoch(model, test_data_loaders)
+        print('===> Test Done!')
 
 if __name__ == '__main__':
     main()
