@@ -152,8 +152,11 @@ class Adapter(nn.Module):
         loss_intra = 0
         loss_moe = 0
         # self.fuse(0, x, clip_features, (h, w))
+        block_features = []
+
         for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
             x = block(x)  # (N, Q_L+L, D)
+            block_features.append(x)
 
             moe_out, moe_loss = self.lora_moe_layers[i](x)
             x = x + moe_out
@@ -184,4 +187,4 @@ class Adapter(nn.Module):
             xray_preds.append(xray_pred)
             attn_biases.append(attn_bias)
 
-        return attn_biases, xray_preds, loss_intra, loss_moe
+        return attn_biases, xray_preds, loss_intra, loss_moe, block_features

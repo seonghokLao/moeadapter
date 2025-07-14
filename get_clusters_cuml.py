@@ -10,7 +10,8 @@ import torch
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.utils.data
-from sklearn.cluster import KMeans
+from cuml.cluster import KMeans as cuKMeans
+import cupy as cp
 from sklearn.metrics import silhouette_score
 
 from dataset.abstract_dataset import DeepfakeAbstractBaseDataset
@@ -99,7 +100,7 @@ def test_one_dataset(model, data_loader):
         prediction_lists += list(predictions['prob'].cpu().detach().numpy())
         #feature_lists += list(predictions['feat'].cpu().detach().numpy())
         for block_idx, block_feat in enumerate(predictions['block_features']):
-            block_features_all[block_idx].append(block_feat.cpu())
+            block_features_all[block_idx].append(block_feat.detach())
     
     return np.array(prediction_lists), np.array(label_lists), block_features_all#,np.array(feature_lists)
     
@@ -130,16 +131,23 @@ def test_epoch(model, test_data_loaders):
             tqdm.write(f"{k}: {v}")
     
     for block_idx, features_tensor in enumerate(block_features_dataset):
-        features = features_tensor.reshape(-1, features_tensor.shape[-1]).numpy()
+        features = torch.cat(features_tensor, dim=0)
+        features = features.reshape(-1, features.shape[-1])
+
+        features_cupy = cp.asarray(features)  # Convert to cupy array for cuML compatibility
+
+        # print(features.device)
         best_n_clusters = 2
         best_score = -1
         best_centers = None
 
         # Try cluster numbers from 2 to 12
         for n_clusters in range(2, 13):
-            kmeans = KMeans(n_clusters=n_clusters)
+            print(f"Clustering block {block_idx} with n_clusters={n_clusters} ...")
+            kmeans = cuKMeans(n_clusters=n_clusters)
             labels = kmeans.fit_predict(features)
-            score = silhouette_score(features, labels)
+            score = silhouette_score(features.cpu().numpy(), labels.get() if hasattr(labels, 'get') else labels)
+            print(f"Block {block_idx}, n_clusters={n_clusters}, silhouette={score:.4f}")
             if score > best_score:
                 best_score = score
                 best_n_clusters = n_clusters

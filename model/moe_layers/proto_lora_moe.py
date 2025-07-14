@@ -282,7 +282,7 @@ class LoRA_MoElayer(nn.Module):
             assert (gates.sum(dim=1) > 0).all(), f"Some samples have no expert assignment: {gates}"
             # assert (gates.sum(dim=0) > 0).all(), f"Some experts have no assignments: {gates}"
             self.update_prototypes(x_mean, gates)
-        # print(gates)
+        # print(gates)  
 
         dispatcher = SparseDispatcher(self.num_experts, gates)
         expert_inputs = dispatcher.dispatch(x_mean)
