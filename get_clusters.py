@@ -10,7 +10,7 @@ import torch
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.utils.data
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.metrics import silhouette_score
 
 from dataset.abstract_dataset import DeepfakeAbstractBaseDataset
@@ -79,7 +79,9 @@ def test_one_dataset(model, data_loader):
     prediction_lists = []
     #feature_lists = []
     label_lists = []
-    block_features_all = [[] for _ in range(len(model.adapter.vit_model.blocks))]
+    # block_features_all = [[] for _ in range(len(model.adapter.vit_model.blocks))]
+    block_features_all = [[] for _ in range(8)]
+    # print(block_features_all)
 
     for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
         # get data
@@ -130,23 +132,51 @@ def test_epoch(model, test_data_loaders):
             tqdm.write(f"{k}: {v}")
     
     for block_idx, features_tensor in enumerate(block_features_dataset):
-        features = features_tensor.reshape(-1, features_tensor.shape[-1]).numpy()
-        best_n_clusters = 2
-        best_score = -1
+        # print(features_tensor[0].shape)
+        features_tensor = torch.cat(features_tensor, dim=0)
+        # features = features_tensor.reshape(-1, features_tensor.shape[-1]).numpy()
+        features = features_tensor.mean(dim=1).numpy()
         best_centers = None
 
+        wcss = []
+        k_range = range(2, 13)  # Range of k values to test
         # Try cluster numbers from 2 to 12
-        for n_clusters in range(2, 13):
-            kmeans = KMeans(n_clusters=n_clusters)
-            labels = kmeans.fit_predict(features)
-            score = silhouette_score(features, labels)
-            if score > best_score:
-                best_score = score
-                best_n_clusters = n_clusters
-                best_centers = kmeans.cluster_centers_
+        # for k in k_range:
+        #     print(f"Clustering block {block_idx} with n_clusters={k} ...")
+        #     kmeans = KMeans(n_clusters=k, random_state=1020)
+        #     # kmeans = MiniBatchKMeans(n_clusters=n_clusters, batch_size=64, random_state=1020)
+        #     kmeans.fit(features)
+        #     wcss.append(kmeans.inertia_)
+        #     # labels = kmeans.fit_predict(features)
+        #     # score = silhouette_score(features, labels)
+        #     # print(f"Block {block_idx}, n_clusters={n_clusters}, silhouette={score:.4f}")
+        #     # if score > best_score:
+        #     #     best_score = score
+        #     #     best_n_clusters = n_clusters
+        #     #     best_centers = kmeans.cluster_centers_
+        
+        # import matplotlib.pyplot as plt
 
-        torch.save(torch.tensor(best_centers, dtype=torch.float32), f"model/clusters/vit_block{block_idx}_n{best_n_clusters}.pt")
-        print(f"Block {block_idx}: optimal clusters={best_n_clusters}, silhouette={best_score:.4f}")
+        # plt.plot(range(2, 13), wcss, marker='o')
+        # plt.xlabel('Number of Clusters (k)')
+        # plt.ylabel('WCSS (Inertia)')
+        # plt.title('Elbow Method for Optimal k')
+        # plt.grid(True)
+        # plt.show()
+
+        # from kneed import KneeLocator
+        # kneedle = KneeLocator(k_range, wcss, curve='convex', direction='decreasing')
+        # best_k = kneedle.elbow
+        best_k = 5
+        # print(f"[Elbow] Optimal number of clusters: {best_k}")
+
+        # Step 3: Fit KMeans again with best_k and save centers
+        kmeans = KMeans(n_clusters=5, random_state=42)
+        kmeans.fit(features)
+        best_centers = kmeans.cluster_centers_
+
+        torch.save(torch.tensor(best_centers, dtype=torch.float32), f"model/clusters/vit_block{block_idx}_n{best_k}.pt")
+        # print(f"Block {block_idx}: optimal clusters={best_n_clusters}, silhouette={best_score:.4f}")
 
     return metrics_all_datasets
 

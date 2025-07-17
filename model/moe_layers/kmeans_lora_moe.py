@@ -143,6 +143,8 @@ class LoRA_MoElayer(nn.Module):
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(1)
 
+        self.cluster_centers = None
+
         assert(self.k <= self.num_experts)
 
     def set_cluster_centers(self, centers):
