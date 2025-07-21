@@ -67,8 +67,9 @@ class Adapter(nn.Module):
         self.patch_conv = nn.Conv2d(in_channels=3, out_channels=self.num_features, kernel_size=16, stride=16,
                                     bias=True)
         print(f"num features: {self.num_features}")
+        lora_dim = [64, 64, 64, 64, 64]  # Example dimensions for LoRA layers
         self.lora_moe_layers = nn.ModuleList([
-            LoRA_MoElayer(dim=self.num_features, lora_dim=[64, 64, 64, 64, 64]).to(self.device)
+            LoRA_MoElayer(dim=self.num_features, lora_dim=lora_dim).to(self.device)
             # for _ in self.vit_model.blocks
             for _ in range(8)  # Blocks 0 to 7
         ])
@@ -171,13 +172,14 @@ class Adapter(nn.Module):
         loss_moe = 0
         # self.fuse(0, x, clip_features, (h, w))
         block_features = []
+        moe_outs = []
 
         for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
             x = block(x)  # (N, Q_L+L, D)
-            block_features.append(x)
+            # block_features.append(x)
 
             moe_out, moe_loss = self.lora_moe_layers[i-1](x)
-            x = x + moe_out
+            moe_outs.append(moe_out)
             # loss_moe += moe_loss
             
             self.fuse(i, x, clip_features, (h, w))
@@ -186,6 +188,7 @@ class Adapter(nn.Module):
                 loss_intra = loss_tmp_intra + loss_intra if loss_tmp_intra != 0 else loss_intra
             if i in out_layers:
                 n, _, d = x.shape
+                x = x + torch.stack(moe_outs, dim=1).mean(dim=1)  # (N, Q_L+L, D)
                 outs.append(
                     {
                         'query': x[:, :-v_L, ...],
@@ -200,6 +203,7 @@ class Adapter(nn.Module):
         xray_preds = []
         attn_biases = []
 
+        # print("len of outs:", len(outs))
         for feature in outs:
             xray_pred, attn_bias = self.mask_decoder(feature['query'], feature['x'])
             xray_preds.append(xray_pred)

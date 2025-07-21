@@ -235,6 +235,7 @@ class Trainer(object):
 
         test_step1 = len(train_data_loader) // times_per_epoch
         test_step2 = len(train_data_loader) // 20
+        test_step3 = len(train_data_loader) // 4
         step_cnt = epoch * len(train_data_loader)
 
         # define training recorder
@@ -302,7 +303,7 @@ class Trainer(object):
                     recorder.clear()
 
             # run test
-            if ((step_cnt + 1) % test_step2 == 0 and (step_cnt + 1) % len(train_data_loader) <= 3 * test_step2) or ((step_cnt + 1) % test_step1 == 0 and 6 * test_step1 < (step_cnt + 1) % len(train_data_loader) <= 16 * test_step1) or ((step_cnt + 1) % test_step2 == 0 and 16 * test_step2 < (step_cnt + 1) % len(train_data_loader) <= 20 * test_step2):
+            if ((step_cnt + 1) % test_step2 == 0 and (step_cnt + 1) % len(train_data_loader) <= 3 * test_step2) or ((step_cnt + 1) % test_step1 == 0 and 6 * test_step1 < (step_cnt + 1) % len(train_data_loader) <= 16 * test_step1) or ((step_cnt + 1) % test_step2 == 0 and 16 * test_step2 < (step_cnt + 1) % len(train_data_loader) <= 20 * test_step2) or ((step_cnt + 1) % test_step3 == 0):
                 if test_data_loaders is not None :
                     self.logger.info("===> Test start!")
                     test_best_metric = self.test_epoch(

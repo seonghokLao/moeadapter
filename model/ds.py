@@ -3,7 +3,7 @@ from sklearn import metrics
 from torch import nn
 from model.clip.clip import load
 import torch
-from model.adapters.adapter_kmeans_loramoe import Adapter
+from model.adapters.adapter_residual_moe import Adapter
 from .attn import RecAttnClip
 from .layer import PostClipProcess, MaskPostXrayProcess
 import torch.nn.functional as F
@@ -36,9 +36,10 @@ class DS(nn.Module):
 
 
     def _freeze(self):
-        for name, param in self.named_parameters():
-            if 'clip_model' in name :
-                param.requires_grad = False
+        # for name, param in self.named_parameters():
+        #     if 'clip_model' in name :
+        #         param.requires_grad = False
+        pass
 
     def get_losses(self, data_dict, pred_dict):
         label = data_dict['label'] #N
