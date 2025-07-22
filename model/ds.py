@@ -3,7 +3,7 @@ from sklearn import metrics
 from torch import nn
 from model.clip.clip import load
 import torch
-from model.adapters.adapter_residual_moe import Adapter
+from model.adapters.adapter_moe_ffd import Adapter
 from .attn import RecAttnClip
 from .layer import PostClipProcess, MaskPostXrayProcess
 import torch.nn.functional as F
@@ -48,14 +48,14 @@ class DS(nn.Module):
         xray_pred = pred_dict['xray_pred']
         loss_intra = pred_dict['loss_intra']
         loss_clip = pred_dict['loss_clip']
-        # loss_moe = pred_dict['loss_moe']
+        loss_moe = pred_dict['loss_moe']
         criterion = nn.CrossEntropyLoss()
         loss1 = criterion(pred.float(), label)
         if xray is not None:
             # xray_pred = xray_pred.detach()
             loss_mse = F.mse_loss(xray_pred.squeeze().float(), xray.squeeze().float())  # (N 1 224 224)->(N 224 224)
 
-            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip #+ 0.05 * loss_moe
+            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip + 0.05 * loss_moe
 
 
             loss_dict = {
@@ -63,7 +63,7 @@ class DS(nn.Module):
                 'xray': loss_mse,
                 'intra': loss_intra,
                 'loss_clip':loss_clip,
-                # 'loss_moe':loss_moe,
+                'loss_moe':loss_moe,
                 'overall': loss
             }
             return loss_dict
@@ -114,7 +114,7 @@ class DS(nn.Module):
 
         clip_features = self.clip_model.extract_features(clip_images, self.adapter.fusion_map.values())
 
-        attn_biases, xray_preds, loss_adapter_intra, loss_moe, block_features = self.adapter(data_dict, clip_features,
+        attn_biases, xray_preds, loss_adapter_intra, loss_moe = self.adapter(data_dict, clip_features,
                                                                                 inference)
         # attn_biases = [ab.detach() for ab in attn_biases]
         # xray_preds = [xp.detach() for xp in xray_preds]
@@ -141,8 +141,8 @@ class DS(nn.Module):
             'xray_pred': outputs['xray_pred'],
             'loss_intra': loss_adapter_intra,
             'loss_clip':loss_clip,
-            # 'loss_moe':loss_moe,
-            'block_features': block_features
+            'loss_moe':loss_moe,
+            # 'block_features': block_features
         }
 
         if inference:

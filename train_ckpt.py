@@ -14,6 +14,7 @@ import torch.distributed as dist
 
 from dataset.abstract_dataset import DeepfakeAbstractBaseDataset
 from model.ds import DS
+from model.moe_layers.lora_moe import LoRA_MoElayer
 from trainer.trainer import Trainer
 from trainer.metrics.utils import parse_metric_for_print
 from logger import create_logger, RankFilter
@@ -220,15 +221,19 @@ def main():
     ckpt = torch.load('ckpt_best.pth', map_location=config['device'])
     
     keys_to_remove = [k for k in ckpt.keys() if 'clip_post_process' in k]
-    for k in keys_to_remove:
-        print(f"Removing key: {k}")
-        del ckpt[k]
+    # for k in keys_to_remove:
+    #     print(f"Removing key: {k}")
+    #     del ckpt[k]
 
     model.load_state_dict(ckpt, strict=False)
 
     def freeze_model(model):
         for name, param in model.named_parameters():
-            param.requires_grad = "lora_moe_layers" in name or 'clip_post_process' in name
+            param.requires_grad = "lora_moe_layers" in name #or 'clip_post_process' in name
+        for name, module in model.named_modules():
+            if isinstance(module, LoRA_MoElayer):
+                for param in module.parameters():
+                    param.requires_grad = True
 
     freeze_model(model)
 

@@ -127,7 +127,7 @@ class LoRA_MoElayer(nn.Module):
         for i,d in enumerate(lora_dim):
             Lora_a_experts.append(nn.Linear(dim, d,bias = False))
             nn.init.kaiming_uniform_(Lora_a_experts[i].weight, a=math.sqrt(5))
-            Lora_b_experts.append(nn.Linear(d, dim*3,bias = False))
+            Lora_b_experts.append(nn.Linear(d, dim,bias = False))
             nn.init.zeros_(Lora_b_experts[i].weight)
 
         # define lora param
@@ -138,6 +138,8 @@ class LoRA_MoElayer(nn.Module):
         self.w_noise = nn.Parameter(torch.zeros(dim, len(Lora_a_experts)), requires_grad=True)
         self.register_buffer("mean", torch.tensor([0.0]))
         self.register_buffer("std", torch.tensor([1.0]))
+
+        self.proj = nn.Linear(192, 128)
 
 
         self.softplus = nn.Softplus()
@@ -201,8 +203,9 @@ class LoRA_MoElayer(nn.Module):
         threshold_if_out = torch.unsqueeze(torch.gather(top_values_flat, 0, threshold_positions_if_out), 1)
         # is each value currently in the top k.
         normal = Normal(self.mean, self.std)
-        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev)
-        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev)
+        eps = 1e-6
+        prob_if_in = normal.cdf((clean_values - threshold_if_in)/noise_stddev.clamp(min=eps))
+        prob_if_out = normal.cdf((clean_values - threshold_if_out)/noise_stddev.clamp(min=eps))
         prob = torch.where(is_in, prob_if_in, prob_if_out)
         return prob
 
@@ -256,8 +259,12 @@ class LoRA_MoElayer(nn.Module):
         encourages all experts to be approximately equally used across a batch.
         """
         B, N, C = x.shape
-        x = x.reshape(B*N,C)
+        # print("input shape:", x.shape)
+        # x = x.reshape(B*N,C)
+        x = torch.mean(x,dim=1,keepdim=False)
+        # print("input memory (MB):", x.element_size() * x.numel() / (1024 ** 2))
         gates, load = self.noisy_top_k_gating(x, self.training)
+        # print("Gate values:", gates[0])
         # calculate importance loss
         importance = gates.sum(0)
         #
@@ -272,10 +279,16 @@ class LoRA_MoElayer(nn.Module):
         for i in range(self.num_experts):
             if len(expert_inputs[i]) == 0: continue
             qkv_delta = F.linear(expert_inputs[i], self.Lora_a_experts[i].weight)
+            #activation
+            qkv_delta = F.gelu(qkv_delta)
             qkv_delta = F.linear(qkv_delta, self.Lora_b_experts[i].weight)
             expert_outputs.append(qkv_delta)
         y = dispatcher.combine(expert_outputs)
-        y = y.reshape(B,N,C*3)
+        # y = y.reshape(B,N,C)
+        y = y.unsqueeze(1)
+
+        y = self.proj(y)  # (B,1,128)
+        y = y.expand(-1, N, -1)
         return y, loss
 
 

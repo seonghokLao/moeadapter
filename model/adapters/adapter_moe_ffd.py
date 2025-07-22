@@ -5,7 +5,6 @@ from torch.nn import functional as F
 
 from model.layer import Fusion, MLP, PatchEmbed, VT_LN
 from functools import partial
-
 from model.moe_layers.lora_moe import LoRA_MoElayer
 
 
@@ -17,16 +16,14 @@ class Mask_Decoder(nn.Module):
         self.out_dim = out_dim
         self.head_num = head_num
         dense_affine_func = partial(nn.Conv2d, kernel_size=1)
-        # self.query_mlp = MLP(in_dim, mlp_dim, out_dim, mlp_num_layers)  # L R L R L
+        self.query_mlp = MLP(in_dim, mlp_dim, out_dim, mlp_num_layers)  # L R L R L
         self.xray_mlp = MLP(in_dim, mlp_dim, out_dim, mlp_num_layers, affine_func=dense_affine_func)
         self.attn_mlp = MLP(in_dim, mlp_dim, out_dim * self.head_num, mlp_num_layers, affine_func=dense_affine_func)
-        lora_dim = [8,16,32,48,64,96,128]  # Example dimensions for LoRA layers
-        self.query_mlp = LoRA_MoElayer(dim=in_dim, lora_dim=lora_dim)
         self.bias_scaling = nn.Linear(1, 1)
 
     def forward(self, query, x):
         # query (N,QL,D) x (N D H W)
-        query, query_loss = self.query_mlp(query)
+        query = self.query_mlp(query)
         xray = self.xray_mlp(x)
         attn = self.attn_mlp(x)
         patch_x = x.reshape(x.shape[0], x.shape[1], -1) #(N D L)
@@ -36,9 +33,7 @@ class Mask_Decoder(nn.Module):
         attn = attn.reshape(n, self.head_num, d, h, w)  # (N Head*D,h,w)->(N Head D h w)
         attn_bias = torch.einsum('NQD,NHDhw->NHQhw', query, attn)
         attn_bias = self.bias_scaling(attn_bias[..., None]).squeeze(-1)
-
-        moe_loss = query_loss
-        return xray_pred, attn_bias, moe_loss
+        return xray_pred, attn_bias
 
 
 class Adapter(nn.Module):
@@ -70,7 +65,25 @@ class Adapter(nn.Module):
         self.ln_pre = VT_LN(self.num_features)
         self.patch_conv = nn.Conv2d(in_channels=3, out_channels=self.num_features, kernel_size=16, stride=16,
                                     bias=True)
-        # print(self.num_features)
+        
+        self.inject_moe()
+
+    
+    def inject_moe(self, lora_dim=[8,16,32,48,64,96,128], k=1):
+        for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
+            dim = block.norm1.normalized_shape[0]  # D
+            block.lora_moe = LoRA_MoElayer(dim=dim, lora_dim=lora_dim, k=k).to(self.device)
+
+            def new_forward(x, block=block):
+                delta, moe_loss = block.lora_moe(block.norm1(x))
+                x = x + delta
+                x = x + block.drop_path1(block.ls1(block.attn(block.norm1(x))))
+                x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
+                block._moe_loss = moe_loss
+                return x
+            
+            block.forward = new_forward
+
 
     def fuse(self, block_idx, x, clip_features, spatial_shape):
         if block_idx in self.fusion_map.keys():
@@ -131,7 +144,6 @@ class Adapter(nn.Module):
         image = data_dict['image']
         x = self.patch_conv(image)
         x = x.reshape(x.shape[0], x.shape[1], -1)
-        # print("x.shape",x.shape)
         x = x.permute(0, 2, 1)
 
         pos_embed = self.vit_model.pos_embed  # (N L D)
@@ -148,15 +160,12 @@ class Adapter(nn.Module):
         x = torch.cat([self.query_embed.expand(x.shape[0], -1, -1), x], dim=1)  # (N ,Q_L+L,D)
         x = x + pos_embed
         x = self.ln_pre(x)
-        # print("x.shape",x.shape)
         outs = []
         out_layers = [8]
         loss_intra = 0
-        loss_moe = 0
         # self.fuse(0, x, clip_features, (h, w))
         for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
             x = block(x)  # (N, Q_L+L, D)
-            
             self.fuse(i, x, clip_features, (h, w))
             if not inference:  #train
                 loss_tmp_intra = self.intra_contra(i, x, data_dict['patch_label'], data_dict['label'], (h, w))
@@ -178,9 +187,11 @@ class Adapter(nn.Module):
         attn_biases = []
 
         for feature in outs:
-            xray_pred, attn_bias, moe_loss = self.mask_decoder(feature['query'], feature['x'])
+            xray_pred, attn_bias = self.mask_decoder(feature['query'], feature['x'])
             xray_preds.append(xray_pred)
             attn_biases.append(attn_bias)
-            loss_moe += moe_loss
 
-        return attn_biases, xray_preds, loss_intra, loss_moe
+        moe_losses = [blk._moe_loss for blk in self.vit_model.blocks if hasattr(blk, '_moe_loss')]
+        moe_loss = torch.stack(moe_losses).mean() if moe_losses else torch.tensor(0.0, device=self.device)
+
+        return attn_biases, xray_preds, loss_intra, moe_loss
