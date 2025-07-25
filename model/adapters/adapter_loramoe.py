@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from model.layer import Fusion, MLP, PatchEmbed, VT_LN
 from functools import partial
 
-from model.moe_layers.proto_lora_moe import LoRA_MoElayer
+from model.moe_layers.lora_moe_no_attn import LoRA_MoElayer
 
 
 class Mask_Decoder(nn.Module):
@@ -187,4 +187,4 @@ class Adapter(nn.Module):
             xray_preds.append(xray_pred)
             attn_biases.append(attn_bias)
 
-        return attn_biases, xray_preds, loss_intra, loss_moe, block_features
+        return attn_biases, xray_preds, loss_intra, loss_moe#, block_features

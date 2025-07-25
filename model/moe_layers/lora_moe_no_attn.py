@@ -286,9 +286,6 @@ class LoRA_MoElayer(nn.Module):
         y = dispatcher.combine(expert_outputs)
         # y = y.reshape(B,N,C)
         y = y.unsqueeze(1)
-
-        y = self.proj(y)  # (B,1,128)
-        y = y.expand(-1, N, -1)
         return y, loss
 
 

@@ -272,6 +272,7 @@ class LoRA_MoElayer(nn.Module):
         for i in range(self.num_experts):
             if len(expert_inputs[i]) == 0: continue
             qkv_delta = F.linear(expert_inputs[i], self.Lora_a_experts[i].weight)
+            qkv_delta = F.gelu(qkv_delta)
             qkv_delta = F.linear(qkv_delta, self.Lora_b_experts[i].weight)
             expert_outputs.append(qkv_delta)
         y = dispatcher.combine(expert_outputs)

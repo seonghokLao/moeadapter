@@ -247,6 +247,7 @@ class LoRA_MoElayer(nn.Module):
         #
         loss = self.cv_squared(importance) + self.cv_squared(load)
         loss *= loss_coef
+        loss = 0
 
         dispatcher = SparseDispatcher(self.num_experts, gates)
         expert_inputs = dispatcher.dispatch(x)
@@ -263,6 +264,7 @@ class LoRA_MoElayer(nn.Module):
         y = dispatcher.combine(expert_outputs)
         # y = y.reshape(B,N,C)
         y = y.unsqueeze(1)
+        y = y.reshape(B,N,C*3)
         return y, loss
 
 

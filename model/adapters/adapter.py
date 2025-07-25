@@ -20,7 +20,7 @@ class Mask_Decoder(nn.Module):
         # self.query_mlp = MLP(in_dim, mlp_dim, out_dim, mlp_num_layers)  # L R L R L
         self.xray_mlp = MLP(in_dim, mlp_dim, out_dim, mlp_num_layers, affine_func=dense_affine_func)
         self.attn_mlp = MLP(in_dim, mlp_dim, out_dim * self.head_num, mlp_num_layers, affine_func=dense_affine_func)
-        lora_dim = [8,16,32,48,64,96,128]  # Example dimensions for LoRA layers
+        lora_dim = [64, 64, 64, 64, 64]  # Example dimensions for LoRA layers
         self.query_mlp = LoRA_MoElayer(dim=in_dim, lora_dim=lora_dim)
         self.bias_scaling = nn.Linear(1, 1)
 

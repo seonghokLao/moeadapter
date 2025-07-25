@@ -5,7 +5,7 @@ from torch.nn import functional as F
 
 from model.layer import Fusion, MLP, PatchEmbed, VT_LN
 from functools import partial
-from model.moe_layers.lora_moe import LoRA_MoElayer
+from model.moe_layers.kmeans_lora_moe import LoRA_MoElayer
 
 
 class Mask_Decoder(nn.Module):
@@ -69,20 +69,35 @@ class Adapter(nn.Module):
         self.inject_moe()
 
     
-    def inject_moe(self, lora_dim=[8,16,32,48,64,96,128], k=1):
-        for i, block in enumerate(self.vit_model.blocks, start=1):  # total 1-12 ,only use 1-8
-            dim = block.norm1.normalized_shape[0]  # D
-            block.lora_moe = LoRA_MoElayer(dim=dim, lora_dim=lora_dim, k=k).to(self.device)
+    def inject_moe(self, lora_dim=[64, 64, 64, 64, 64], k=1):
+        for block in self.vit_model.blocks:  # total 1-12 ,only use 1-8
+            attn = block.attn
+            dim = attn.qkv.in_features  # qkv in_features == embed_dim ==
 
-            def new_forward(x, block=block):
-                delta, moe_loss = block.lora_moe(block.norm1(x))
-                x = x + delta
-                x = x + block.drop_path1(block.ls1(block.attn(block.norm1(x))))
-                x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
-                block._moe_loss = moe_loss
+            attn.moe_qkv = LoRA_MoElayer(dim=dim, lora_dim=lora_dim, k=k).to(self.device)
+            # print(attn.moe_qkv)
+
+            def new_forward(x, attn=attn):
+                B, N, C = x.shape
+                qkv = attn.qkv(x)
+                delta, moe_loss = attn.moe_qkv(x)
+                qkv = qkv + delta
+
+                qkv = qkv.reshape(B, N, 3, attn.num_heads, C // attn.num_heads).permute(2, 0, 3, 1, 4)
+                q, k, v = qkv.unbind(0)  # make torchscript
+
+                attn_weights = (q @ k.transpose(-2, -1)) * attn.scale
+                attn_weights = attn_weights.softmax(dim=-1)
+                attn_weights = attn.attn_drop(attn_weights)
+
+                x = (attn_weights @ v).transpose(1, 2).reshape(B, N, C)
+                x = attn.proj(x)
+                x = attn.proj_drop(x)
+                attn._moe_loss = moe_loss
+
                 return x
             
-            block.forward = new_forward
+            attn.forward = new_forward
 
 
     def fuse(self, block_idx, x, clip_features, spatial_shape):
@@ -191,7 +206,7 @@ class Adapter(nn.Module):
             xray_preds.append(xray_pred)
             attn_biases.append(attn_bias)
 
-        moe_losses = [blk._moe_loss for blk in self.vit_model.blocks if hasattr(blk, '_moe_loss')]
+        moe_losses = [blk.attn._moe_loss for blk in self.vit_model.blocks if hasattr(blk.attn, '_moe_loss')]
         moe_loss = torch.stack(moe_losses).mean() if moe_losses else torch.tensor(0.0, device=self.device)
 
         return attn_biases, xray_preds, loss_intra, moe_loss
