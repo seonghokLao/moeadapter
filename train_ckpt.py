@@ -229,13 +229,18 @@ def main():
 
     def freeze_model(model):
         for name, param in model.named_parameters():
-            param.requires_grad = "lora_moe_layers" in name #or 'clip_post_process' in name
+            param.requires_grad = "moe_qkv" in name #"lora_moe_layers" in name #or 'clip_post_process' in name
         for name, module in model.named_modules():
             if isinstance(module, LoRA_MoElayer):
                 for param in module.parameters():
                     param.requires_grad = True
 
     freeze_model(model)
+
+    trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
+    print(f'trainable params: {sum(p.numel() for p in trainable_params)}')
+    if len(trainable_params) == 0:
+        raise ValueError("No trainable parameters found in the model. Please check the model configuration.")
 
     # prepare the optimizer
     # optimizer = choose_optimizer(model, config)

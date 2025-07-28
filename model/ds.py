@@ -55,7 +55,7 @@ class DS(nn.Module):
             # xray_pred = xray_pred.detach()
             loss_mse = F.mse_loss(xray_pred.squeeze().float(), xray.squeeze().float())  # (N 1 224 224)->(N 224 224)
 
-            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip + 0.01 * loss_moe
+            loss = 10 * loss1 + 200 * loss_mse + 20 * loss_intra + 10 * loss_clip #+ 0.01 * loss_moe
 
 
             loss_dict = {

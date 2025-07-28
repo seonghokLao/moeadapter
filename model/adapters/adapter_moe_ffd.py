@@ -70,11 +70,20 @@ class Adapter(nn.Module):
 
     
     def inject_moe(self, lora_dim=[64, 64, 64, 64, 64], k=1):
-        for block in self.vit_model.blocks:  # total 1-12 ,only use 1-8
+        from pathlib import Path
+        cluster_dir = Path("/home/laoseonghok/github/moeadapter/model/clusters/")
+        for i, block in enumerate(self.vit_model.blocks[1:9]):  # total 1-12 ,only use 1-8
             attn = block.attn
             dim = attn.qkv.in_features  # qkv in_features == embed_dim ==
 
-            attn.moe_qkv = LoRA_MoElayer(dim=dim, lora_dim=lora_dim, k=k).to(self.device)
+            path_list = list(cluster_dir.glob(f'vit_block{i}_n*.pt'))
+            path = path_list[0]  # Use the first match
+            print(f"[Adapter] Loading cluster centers for block {i} from {path.name}")
+            centers = torch.load(path, map_location=self.device)
+            moe_qkv = LoRA_MoElayer(dim=dim, lora_dim=lora_dim, k=k).to(self.device)
+            moe_qkv.set_cluster_centers(centers)
+            attn.add_module("moe_qkv", moe_qkv)  # Add the LoRA MoE layer to the attention module
+            
             # print(attn.moe_qkv)
 
             def new_forward(x, attn=attn):
